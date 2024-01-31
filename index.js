@@ -1,15 +1,31 @@
+require("dotenv").config();
+const cors = require("cors")
+const morgan = require("morgan")
 const express = require("express");
-const morgan = require("morgan");
 
 const app = express();
+const Person = require("./models/person");
 
 morgan.token("body", (req) => {
   return JSON.stringify(req.body);
 });
 
-app.use(express.static("build"))
+app.use(cors())
+app.use(express.static("build"));
 app.use(express.json());
-app.use(morgan(":method :url :body"));
+app.use(morgan(":method :url :response-time ms :body"));
+
+const errorHandler = (error, request, response, next) => {
+  console.error(error.message);
+
+  if (error.name === "CastError") {
+    return response.status(400).send({ error: "malformatted id" });
+  } else if (error.name === "ValidationError") {
+    return response.status(400).json({ error: error.message });
+  }
+
+  next(error);
+};
 
 let phonebook = [
   { id: 1, name: "Arto Hellas", number: "040-123456" },
@@ -18,25 +34,12 @@ let phonebook = [
   { id: 4, name: "Mary Poppendieck", number: "39-23-6423122" },
 ];
 
-const generateId = () => {
-  const maxId =
-    phonebook.length > 0 ? Math.max(...phonebook.map((n) => n.id)) : 0;
-  return maxId + 1;
-};
-
 const isDuplicate = (name) => phonebook.find((person) => person.name === name);
 
-app.get("/api/persons", (req, res) => res.json(phonebook));
+app.get("/api/persons", (req, res) => Person.find({}).then(person => res.json(person)));
 
 app.get("/api/persons/:id", (req, res) => {
-  const id = Number(req.params.id);
-  const person = phonebook.find((person) => person.id === id);
-
-  if (person) {
-    res.json(person);
-  } else {
-    res.status(404).end();
-  }
+  Person.findById(res.params.id).then(person => res.json(person))
 });
 
 app.get("/info", (req, res) => {
@@ -46,33 +49,46 @@ app.get("/info", (req, res) => {
   );
 });
 
-app.delete("/api/persons/:id", (req, res) => {
-  const id = Number(req.params.id);
-  person = phonebook.filter((person) => person.id !== id);
-
-  res.status(204).end();
+app.delete("/api/persons/:id", (req, res, next) => {
+  Person.findByIdAndDelete(req.params.id)
+  .then(result => {
+    res.status(204).end()
+  }).catch(error => next(error))
 });
 
-app.post("/api/persons", (req, res) => {
-  const body = req.body;
+app.put("/api/persons/:id", (request, response, next) => {
+  const body = request.body;
 
-  if (!body.name || !body.number) {
-    return res.status(400).json({ error: "content missing" });
-  }
+  const person = new Person({
+    name: body.name,
+    number: body.number,
+  });
+
+  Person.findByIdAndUpdate(request.params.id, person, { new: true })
+    .then((updatedPerson) => {
+      response.json(updatedPerson);
+    })
+    .catch((error) => next(error));
+});
+
+app.post("/api/persons", (req, res, next) => {
+  const body = req.body;
 
   if (isDuplicate(body.name)) {
     return res.status(400).json({ error: "name must be unique" });
   }
 
-  const person = {
-    id: generateId(),
+  const person = new Person({
     name: body.name,
-    number: body.number,
-  };
+    number: body.number
+  })
 
-  phonebook = phonebook.concat(person);
-
-  res.json(phonebook);
+  person
+    .save()
+    .then((savedPerson) => {
+      response.json(savedPerson);
+    })
+    .catch((error) => next(error));
 });
 
 const unknownEndpoint = (request, response) => {
@@ -80,6 +96,9 @@ const unknownEndpoint = (request, response) => {
 };
 
 app.use(unknownEndpoint);
+app.use(errorHandler);
 
-const PORT = 3001;
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+const PORT = process.env.PORT;
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+});
