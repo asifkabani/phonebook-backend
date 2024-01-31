@@ -42,10 +42,11 @@ app.get("/api/persons/:id", (req, res) => {
   Person.findById(res.params.id).then(person => res.json(person))
 });
 
-app.get("/info", (req, res) => {
+app.get("/info", async (req, res) => {
   const date = new Date(Date.now());
+  const users = await Person.countDocuments({})
   res.send(
-    `<p>Phonebook has info for ${phonebook.length} people</p><p>${date}</p>`
+    `<p>Phonebook has info for ${users} people</p><p>${date}</p>`
   );
 });
 
